@@ -98,6 +98,8 @@ sf::Vector2f SpriteScaleFromDimensions(const sf::Vector2u& textureSize, int scre
 
 int main()
 {
+    sf::Clock startTimer;
+
     std::srand(static_cast<unsigned int>(std::time(NULL)));
 
     // example folder to load images
@@ -135,6 +137,9 @@ int main()
     const int gameHeight = 600;
 
     int imageIndex = 0;
+
+    float TimeToStart = startTimer.getElapsedTime().asMilliseconds();
+    printf("The application took %.3f milliseconds to start\n", TimeToStart);
 
     // Create the window of the application
     sf::RenderWindow window(sf::VideoMode(gameWidth, gameHeight, 32), "Image Fever",
