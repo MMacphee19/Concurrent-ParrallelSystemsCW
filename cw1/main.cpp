@@ -65,22 +65,26 @@ double rgbToColorTemperature(rgba_t rgba) {
 
 
 // Calculate the median from an image filename
-double filename_to_median(const std::string& filename)
+double filename_to_median(const std::string& filename, std::vector<float>& timings)
 {
+    sf::Clock eachImage;
     int width, height;
     auto rgbadata = load_rgb(filename.c_str(), width, height);
     std::vector<double> temperatures;
     std::transform(rgbadata.begin(), rgbadata.end(), std::back_inserter(temperatures), rgbToColorTemperature);
     std::sort(temperatures.begin(), temperatures.end());
     auto median = temperatures.size() % 2 ? 0.5 * (temperatures[temperatures.size() / 2 - 1] + temperatures[temperatures.size() / 2]) : temperatures[temperatures.size() / 2];
+    float ImageTimer = eachImage.getElapsedTime().asMilliseconds();
+    printf("%s took %.3f to load \n", filename.c_str(), ImageTimer);
+    timings.push_back(ImageTimer);
     return median;
 }
 
 // Static sort -- REFERENCE ONLY
-void static_sort(std::vector<std::string>& filenames)
+void static_sort(std::vector<std::string>& filenames, std::vector<float>& timings)
 {
-    std::sort(filenames.begin(), filenames.end(), [](const std::string& lhs, const std::string& rhs) {
-        return filename_to_median(lhs) < filename_to_median(rhs);
+    std::sort(filenames.begin(), filenames.end(), [&timings](const std::string& lhs, const std::string& rhs) {
+        return filename_to_median(lhs, timings) < filename_to_median(rhs, timings);
     });
 }
 
@@ -97,7 +101,7 @@ int main()
     std::srand(static_cast<unsigned int>(std::time(NULL)));
 
     // example folder to load images
-    const char* image_folder = "images/unsorted";
+    const char* image_folder = "../images/unsorted";
     if (!fs::is_directory(image_folder))
     {
         printf("Directory \"%s\" not found: please make sure it exists, and if it's a relative path, it's under your WORKING directory\n", image_folder);
@@ -110,7 +114,21 @@ int main()
     ///////////////////////////////////////////////////////////////////////////////////////////////
     //  YOUR CODE HERE INSTEAD, TO ORDER THE IMAGES IN A MULTI-THREADED MANNER WITHOUT BLOCKING  //
     ///////////////////////////////////////////////////////////////////////////////////////////////
-    static_sort(imageFilenames);
+    sf::Clock sortTimer;
+    std::vector<float> timings;
+    static_sort(imageFilenames, timings);
+    float sortTime = sortTimer.getElapsedTime().asMilliseconds();
+    printf("Sorting took %.3f milliseconds\n", sortTime);
+
+    std::sort(timings.begin(), timings.end());
+    float median;
+    if (timings.size() % 2 == 0) {
+        median = (timings[timings.size() / 2 - 1] + timings[timings.size() / 2] / 2.0);
+    }
+    else {
+        median = timings[timings.size() / 2];
+    }
+    printf("Median: %.3f\n", median);
 
     // Define some constants
     const int gameWidth = 800;
