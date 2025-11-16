@@ -8,6 +8,9 @@
 #include <ctime>
 #include <cstdlib>
 #include <filesystem>
+#include <atomic>
+#include <mutex>
+#include <thread>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -75,7 +78,7 @@ double filename_to_median(const std::string& filename, std::vector<float>& timin
     std::sort(temperatures.begin(), temperatures.end());
     auto median = temperatures.size() % 2 ? 0.5 * (temperatures[temperatures.size() / 2 - 1] + temperatures[temperatures.size() / 2]) : temperatures[temperatures.size() / 2];
     float ImageTimer = eachImage.getElapsedTime().asMilliseconds();
-    printf("%s took %.3f to load \n", filename.c_str(), ImageTimer);
+    // printf("%s took %.3f to load \n", filename.c_str(), ImageTimer);
     timings.push_back(ImageTimer);
     return median;
 }
@@ -96,8 +99,72 @@ sf::Vector2f SpriteScaleFromDimensions(const sf::Vector2u& textureSize, int scre
     return { scale, scale };
 }
 
+std::atomic<bool> sortingComplete(false);
+
+void sortImagesInBackground(
+std::vector<std::string>& filenames,
+std::vector<std::pair<std::string, double>>& imageData,
+std::vector<float>& timings,
+std::mutex& dataMutex,
+std::atomic<int>& currentIndex
+) {
+    sf::Clock sortTimer;
+    auto workerFunction = [&]() {
+        while (true) {
+            int myIndex = currentIndex.fetch_add(1);
+
+            if (myIndex >= filenames.size()) {
+                break;
+            }
+
+            double median = filename_to_median(filenames[myIndex], timings);
+
+            {
+                std::lock_guard<std::mutex> lock(dataMutex);
+                imageData.push_back({ filenames[myIndex], median });
+            }
+        }
+    };
+
+    std::thread t1(workerFunction);
+    std::thread t2(workerFunction);
+    std::thread t3(workerFunction);
+    // std::thread t4(workerFunction);
+
+    t1.join();
+    t2.join();
+    t3.join();
+    // t4.join();
+
+    std::sort(imageData.begin(), imageData.end(),
+        [](const auto& a, const auto& b) {
+            return a.second < b.second;
+        });
+
+    filenames.clear();
+    for (const auto& pair : imageData) {
+        filenames.push_back(pair.first);
+    }
+
+    float sortTime = sortTimer.getElapsedTime().asMilliseconds();
+    printf("Sorting took %.3f milliseconds\n", sortTime);
+
+    std::sort(timings.begin(), timings.end());
+    float median;
+    if (timings.size() % 2 == 0) {
+        median = (timings[timings.size() / 2 - 1] + timings[timings.size() / 2]) / 2.0;
+    }
+    else {
+        median = timings[timings.size() / 2];
+    }
+    printf("Median: %.3f\n", median);
+
+    sortingComplete = true;
+}
+
 int main()
 {
+    sf::Clock windowTimer;
     std::srand(static_cast<unsigned int>(std::time(NULL)));
 
     // example folder to load images
@@ -114,27 +181,41 @@ int main()
     ///////////////////////////////////////////////////////////////////////////////////////////////
     //  YOUR CODE HERE INSTEAD, TO ORDER THE IMAGES IN A MULTI-THREADED MANNER WITHOUT BLOCKING  //
     ///////////////////////////////////////////////////////////////////////////////////////////////
+    std::atomic<int> currentIndex(0);
+
     sf::Clock sortTimer;
     std::vector<float> timings;
-    static_sort(imageFilenames, timings);
-    float sortTime = sortTimer.getElapsedTime().asMilliseconds();
-    printf("Sorting took %.3f milliseconds\n", sortTime);
+    std::vector<std::pair<std::string, double>> imageData;
+    std::mutex dataMutex;
 
-    std::sort(timings.begin(), timings.end());
-    float median;
-    if (timings.size() % 2 == 0) {
-        median = (timings[timings.size() / 2 - 1] + timings[timings.size() / 2] / 2.0);
-    }
-    else {
-        median = timings[timings.size() / 2];
-    }
-    printf("Median: %.3f\n", median);
+    // sortImagesInBackground(imageFilenames, imageData, timings, dataMutex, currentIndex);
+
+    std::thread sortingThread(sortImagesInBackground,
+        std::ref(imageFilenames),
+        std::ref(imageData),
+        std::ref(timings),
+        std::ref(dataMutex),
+        std::ref(currentIndex));
+    sortingThread.detach();
+
+    // float sortTime = sortTimer.getElapsedTime().asMilliseconds();
+    // printf("Sorting took %.3f milliseconds\n", sortTime);
+
+    // std::sort(timings.begin(), timings.end());
+    // float median;
+    // if (timings.size() % 2 == 0) {
+        // median = (timings[timings.size() / 2 - 1] + timings[timings.size() / 2]) / 2.0;
+    // }
+    // else {
+        // median = timings[timings.size() / 2];
+    // }
+    // printf("Median: %.3f\n", median);
 
     // Define some constants
     const int gameWidth = 800;
     const int gameHeight = 600;
 
-    int imageIndex = 0;
+    int currentImageIndex = 0;
 
     // Create the window of the application
     sf::RenderWindow window(sf::VideoMode(gameWidth, gameHeight, 32), "Image Fever",
@@ -142,12 +223,19 @@ int main()
     window.setVerticalSyncEnabled(true);
 
     // Load an image to begin with
-    sf::Texture texture;
-    if (!texture.loadFromFile(imageFilenames[imageIndex]))
-        return EXIT_FAILURE;
-    sf::Sprite sprite (texture);
+    // sf::Texture texture;
+    // if (!texture.loadFromFile(imageFilenames[currentImageIndex]))
+        // return EXIT_FAILURE;
+    // sf::Sprite sprite (texture);
     // Make sure the texture fits the screen
-    sprite.setScale(SpriteScaleFromDimensions(texture.getSize(),gameWidth,gameHeight));
+    // sprite.setScale(SpriteScaleFromDimensions(texture.getSize(),gameWidth,gameHeight));
+
+    sf::Texture texture;
+    sf::Sprite sprite;
+    bool firstImageLoaded = false;
+
+    float windowLoadTime = windowTimer.getElapsedTime().asMilliseconds();
+    printf("Window opened in %.3f milliseconds\n", windowLoadTime);
 
     sf::Clock clock;
     while (window.isOpen())
@@ -176,13 +264,16 @@ int main()
             // Arrow key handling!
             if (event.type == sf::Event::KeyPressed)
             {
+                if (!sortingComplete) {
+                    continue;
+                }
                 // adjust the image index
                 if (event.key.code == sf::Keyboard::Key::Left)
-                    imageIndex = (imageIndex + imageFilenames.size() - 1) % imageFilenames.size();
+                    currentImageIndex = (currentImageIndex + imageFilenames.size() - 1) % imageFilenames.size();
                 else if (event.key.code == sf::Keyboard::Key::Right)
-                    imageIndex = (imageIndex + 1) % imageFilenames.size();
+                    currentImageIndex = (currentImageIndex + 1) % imageFilenames.size();
                 // get image filename
-                const auto& imageFilename = imageFilenames[imageIndex];
+                const auto& imageFilename = imageFilenames[currentImageIndex];
                 // set it as the window title 
                 window.setTitle(imageFilename);
                 // ... and load the appropriate texture, and put it in the sprite
@@ -191,6 +282,16 @@ int main()
                     sprite = sf::Sprite(texture);
                     sprite.setScale(SpriteScaleFromDimensions(texture.getSize(), gameWidth, gameHeight));
                 }
+            }
+        }
+
+        // Load first image when sorting completes
+        if (sortingComplete && !firstImageLoaded) {
+            if (texture.loadFromFile(imageFilenames[currentImageIndex])) {
+                sprite = sf::Sprite(texture);
+                sprite.setScale(SpriteScaleFromDimensions(texture.getSize(), gameWidth, gameHeight));
+                firstImageLoaded = true;
+                printf("First image loaded after sorting completed\n");
             }
         }
 
