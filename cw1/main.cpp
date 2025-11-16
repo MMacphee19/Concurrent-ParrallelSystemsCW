@@ -291,7 +291,6 @@ int main()
                 sprite = sf::Sprite(texture);
                 sprite.setScale(SpriteScaleFromDimensions(texture.getSize(), gameWidth, gameHeight));
                 firstImageLoaded = true;
-                printf("First image loaded after sorting completed\n");
             }
         }
 
