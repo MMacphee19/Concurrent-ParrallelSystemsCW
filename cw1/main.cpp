@@ -165,6 +165,7 @@ std::atomic<int>& currentIndex
 int main()
 {
     sf::Clock windowTimer;
+    sf::Clock startTimer;
     std::srand(static_cast<unsigned int>(std::time(NULL)));
 
     // example folder to load images
